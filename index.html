@@ -1134,6 +1134,11 @@ function myStats(){
   K.q.forEach(q=>{const x=S.p[q.id]; if(!x||!x.n) return; answered+=x.n; correct+=(x.c!==undefined?x.c:Math.max(0,x.n-x.w)); if(x.b>=3) sure++});
   return {name:S.nick||'',answered,correct:Math.min(correct,answered),sure};
 }
+async function resetStats(){
+  if(!confirm('Wirklich die komplette Statistik löschen?\n\nAlle beantworteten Fragen, Fehler, Prüfungsergebnisse, dein Spitzname und dein Leaderboard-Eintrag werden gelöscht. Das kann nicht rückgängig gemacht werden.')) return;
+  if(window.kfzBoard&&window.kfzBoard.remove){ try{await window.kfzBoard.remove()}catch(e){console.warn('board remove',e)} }
+  S={p:{},upd:Date.now(),sessions:0,exams:[],orig:[]}; save(); go({name:'home'});
+}
 function pushBoard(){ if(window.kfzBoard&&S.nick) window.kfzBoard.push(myStats()).catch(e=>console.warn('board',e)) }
 window.addEventListener('kfzboard',()=>{ if(view.name==='home') renderHome(); pushBoard() });
 function daysLeft(){const d=new Date(K.exam+'T08:00:00');return Math.max(0,Math.ceil((d-Date.now())/864e5))}
@@ -1176,11 +1181,13 @@ function renderHome(){
     <div class="legend"><span><i style="background:var(--ok)"></i>sicher</span><span><i style="background:var(--warn)"></i>wackelt</span><span><i style="background:var(--bad)"></i>falsch</span></div></div>
   <div class="topics">${topics.map(t=>{const s=topicStats(t.id);return `<button class="topic" data-t="${t.id}"><span class="nm">${esc(t.name)}<br><span class="muted" style="font-weight:400;font-size:.85rem">${s.n} Fragen${t.videos?' · '+t.videos.length+' Video'+(t.videos.length>1?'s':''):''}</span></span><span class="pc">${s.pct}%</span>${bar(s)}</button>`}).join('')}</div>
   <p class="sync" id="sync">Fortschritt: ${syncState}</p>
+  <button class="btn-ghost" id="b-reset" style="align-self:center;color:var(--bad)">Statistik löschen</button>
   <p class="muted" style="font-size:.82rem">Alle Fragen sind aus deinen Unterrichtsblättern erstellt. Prüfungsfragen sind nicht wörtlich übernommen, sondern neu formuliert.</p>`;
   setDock('');
   app.querySelector('#b-quick').onclick=()=>startRun('quick');
   app.querySelector('#b-rand').onclick=()=>startRun('rand');
   const bb=app.querySelector('#b-board'); if(bb) bb.onclick=()=>go({name:'board'});
+  app.querySelector('#b-reset').onclick=resetStats;
   app.querySelector('#b-exam').onclick=()=>go({name:'examInfo'});
   app.querySelector('#b-orig').onclick=()=>go({name:'origInfo'});
   const bw=app.querySelector('#b-wrong'); if(wrong) bw.onclick=()=>startRun('wrong');
@@ -1467,7 +1474,7 @@ render();
 // Firebase-Leaderboard (wird von build.py in pages/index.html eingesetzt)
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {getAuth, signInAnonymously, onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {getFirestore, doc, setDoc, collection, query, orderBy, limit, getDocs, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getFirestore, doc, setDoc, deleteDoc, collection, query, orderBy, limit, getDocs, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp({apiKey:"AIzaSyDh38mbxrn0qaLcEpDtMXiIq9n5qkuUaZI",authDomain:"vincent-pruefung.firebaseapp.com",projectId:"vincent-pruefung",storageBucket:"vincent-pruefung.firebasestorage.app",messagingSenderId:"140842688264",appId:"1:140842688264:web:a3204c46fd971d0a3916bd"});
 const auth = getAuth(app);
@@ -1487,6 +1494,11 @@ window.kfzBoard = {
   async list() {
     const r = await getDocs(query(collection(db, "board"), orderBy("correct", "desc"), limit(100)));
     return r.docs.map(d => ({id: d.id, ...d.data()}));
+  },
+  async remove() {
+    const uid = await uidP;
+    await deleteDoc(doc(db, "board", uid));
+    last = "";
   },
   me() { return uidP; }
 };
