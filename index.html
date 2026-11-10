@@ -1109,7 +1109,7 @@ function paintSync(){const el=document.getElementById('sync'); if(el) el.textCon
 function st(id){return S.p[id]||{b:0,n:0,w:0,l:0}}
 function grade(id,r){ // r: 1 richtig, .5 teilweise, 0 falsch
   const x=Object.assign({},st(id)); x.n++; x.l=Date.now();
-  if(r===1) x.b=Math.min(5,x.b+1); else if(r===0){x.b=0;x.w++}
+  if(r===1){x.b=Math.min(5,x.b+1); x.c=(x.c===undefined?Math.max(0,x.n-1-x.w):x.c)+1} else if(r===0){x.b=0;x.w++}
   S.p[id]=x; save();
 }
 function level(id){const x=S.p[id]; if(!x||!x.n) return 'new'; if(x.b>=3) return 'g'; if(x.b>=1) return 'y'; return 'r'}
@@ -1128,6 +1128,14 @@ function topicStats(tid){
   const qs=K.q.filter(q=>!tid||q.t===tid); const c={g:0,y:0,r:0,new:0};
   qs.forEach(q=>c[level(q.id)]++); return {n:qs.length,...c,pct:Math.round(c.g/qs.length*100)};
 }
+// ---------- Leaderboard (nur GitHub-Pages-Version, window.kfzBoard kommt aus Firebase-Modul) ----------
+function myStats(){
+  let answered=0,correct=0,sure=0;
+  K.q.forEach(q=>{const x=S.p[q.id]; if(!x||!x.n) return; answered+=x.n; correct+=(x.c!==undefined?x.c:Math.max(0,x.n-x.w)); if(x.b>=3) sure++});
+  return {name:S.nick||'',answered,correct:Math.min(correct,answered),sure};
+}
+function pushBoard(){ if(window.kfzBoard&&S.nick) window.kfzBoard.push(myStats()).catch(e=>console.warn('board',e)) }
+window.addEventListener('kfzboard',()=>{ if(view.name==='home') renderHome(); pushBoard() });
 function daysLeft(){const d=new Date(K.exam+'T08:00:00');return Math.max(0,Math.ceil((d-Date.now())/864e5))}
 
 // ---------- Ansichten ----------
@@ -1161,6 +1169,7 @@ function renderHome(){
       <button class="btn btn-sec" id="b-wrong" ${wrong?'':'disabled'}>Fehler wiederholen (${wrong})</button>
       <button class="btn btn-sec" id="b-exam">Prüfung simulieren</button>
     </div>
+    ${window.kfzBoard?'<button class="btn btn-sec" id="b-board">🏆 Leaderboard</button>':''}
     <button class="btn btn-orig" id="b-orig">Echte WiSo-Prüfung Hessen Sommer 2024<small>47 Originalfragen · 60 Minuten · 100 Punkte</small></button>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;flex-wrap:wrap"><h2>Themen</h2>
@@ -1171,6 +1180,7 @@ function renderHome(){
   setDock('');
   app.querySelector('#b-quick').onclick=()=>startRun('quick');
   app.querySelector('#b-rand').onclick=()=>startRun('rand');
+  const bb=app.querySelector('#b-board'); if(bb) bb.onclick=()=>go({name:'board'});
   app.querySelector('#b-exam').onclick=()=>go({name:'examInfo'});
   app.querySelector('#b-orig').onclick=()=>go({name:'origInfo'});
   const bw=app.querySelector('#b-wrong'); if(wrong) bw.onclick=()=>startRun('wrong');
@@ -1397,6 +1407,7 @@ function finish(){
   if(run.mode==='exam'){S.exams=(S.exams||[]).concat([{d:Date.now(),p:pct}]);save()}
   if(run.mode==='orig'){S.orig=(S.orig||[]).concat([{d:Date.now(),p:pct}]);save()}
   run.result={pct,pts:Math.round(pts*10)/10,max:Math.round(max)};
+  pushBoard();
   go({name:'result'});
 }
 function note(p){return p>=92?'sehr gut':p>=81?'gut':p>=67?'befriedigend':p>=50?'ausreichend':p>=30?'mangelhaft':'ungenügend'}
@@ -1415,8 +1426,33 @@ function renderResult(){
   dockIn.querySelector('#home').onclick=()=>go({name:'home'});
   dockIn.querySelector('#again').onclick=()=>startRun(exam?'quick':run.mode,run.tid);
 }
+function renderBoard(){
+  const me=myStats();
+  app.innerHTML=`<button class="btn-ghost" id="back">← Übersicht</button>
+  <div><div class="eyebrow">Alle Lernenden</div><h1>Leaderboard</h1></div>
+  <div class="card">
+    <h3>${S.nick?'Dein Name: '+esc(S.nick):'Wähle einen Spitznamen'}</h3>
+    <div style="display:flex;gap:8px"><input id="nick" maxlength="20" placeholder="Spitzname" value="${esc(S.nick||'')}" style="flex:1;min-width:0;font:inherit;padding:12px;border-radius:var(--r);border:1.5px solid var(--line);background:var(--bg);color:var(--fg)">
+    <button class="btn btn-sec" id="saveNick">Speichern</button></div>
+    <p class="muted" style="font-size:.85rem">Sichtbar für alle mit dem Link. Kein echter Name nötig.</p>
+  </div>
+  <div class="stats"><div class="stat"><b>${me.answered}</b><span>beantwortet</span></div><div class="stat"><b>${me.correct}</b><span>richtig</span></div><div class="stat"><b>${me.sure}</b><span>sicher gelernt</span></div></div>
+  <div class="card" id="boardList"><p class="muted">Lade Rangliste …</p></div>`;
+  setDock('');
+  app.querySelector('#back').onclick=()=>go({name:'home'});
+  app.querySelector('#saveNick').onclick=()=>{const v=app.querySelector('#nick').value.trim().slice(0,20); if(!v) return; S.nick=v; save(); pushBoard(); setTimeout(renderBoard,600)};
+  const el=app.querySelector('#boardList');
+  if(!window.kfzBoard){el.innerHTML='<p class="muted">Leaderboard gerade nicht erreichbar.</p>';return}
+  const t=setTimeout(()=>{el.innerHTML='<p class="muted">Keine Verbindung. Später nochmal öffnen.</p>'},10000);
+  Promise.all([window.kfzBoard.list(),window.kfzBoard.me()]).then(([rows,uid])=>{
+    clearTimeout(t);
+    if(!rows.length){el.innerHTML='<p class="muted">Noch niemand drin. Spitzname speichern und eine Runde spielen!</p>';return}
+    el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.95rem"><thead><tr style="text-align:left;color:var(--muted);font-size:.8rem"><th>#</th><th>Name</th><th style="text-align:right">richtig</th><th style="text-align:right">beantw.</th><th style="text-align:right">Quote</th></tr></thead><tbody>${rows.map((r,i)=>`<tr style="border-top:1px solid var(--line);${r.id===uid?'font-weight:700;color:var(--accent)':''}"><td style="padding:8px 4px" class="mono">${i+1}</td><td style="padding:8px 4px;word-break:break-word">${esc(r.name||'?')}${r.id===uid?' (du)':''}</td><td class="mono" style="text-align:right">${r.correct|0}</td><td class="mono" style="text-align:right">${r.answered|0}</td><td class="mono" style="text-align:right">${r.answered?Math.round(r.correct/r.answered*100):0}%</td></tr>`).join('')}</tbody></table>`;
+  }).catch(e=>{clearTimeout(t);el.innerHTML='<p class="muted">Rangliste konnte nicht geladen werden.</p>';console.warn(e)});
+}
 function render(){
   if(view.name==='home') renderHome();
+  else if(view.name==='board') renderBoard();
   else if(view.name==='topic') renderTopic();
   else if(view.name==='examInfo') renderExamInfo();
   else if(view.name==='origInfo') renderOrigInfo();
@@ -1425,4 +1461,35 @@ function render(){
 }
 render();
 })();
+</script>
+
+<script type="module">
+// Firebase-Leaderboard (wird von build.py in pages/index.html eingesetzt)
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth, signInAnonymously, onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore, doc, setDoc, collection, query, orderBy, limit, getDocs, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({apiKey:"AIzaSyDh38mbxrn0qaLcEpDtMXiIq9n5qkuUaZI",authDomain:"vincent-pruefung.firebaseapp.com",projectId:"vincent-pruefung",storageBucket:"vincent-pruefung.firebasestorage.app",messagingSenderId:"140842688264",appId:"1:140842688264:web:a3204c46fd971d0a3916bd"});
+const auth = getAuth(app);
+const db = getFirestore(app);
+const uidP = new Promise(res => onAuthStateChanged(auth, u => { if (u) res(u.uid); }));
+signInAnonymously(auth).catch(e => console.warn("auth", e));
+
+let last = "";
+window.kfzBoard = {
+  async push(s) {
+    const k = JSON.stringify(s);
+    if (k === last) return;
+    const uid = await uidP;
+    await setDoc(doc(db, "board", uid), {name: s.name, answered: s.answered, correct: s.correct, sure: s.sure, upd: serverTimestamp()});
+    last = k;
+  },
+  async list() {
+    const r = await getDocs(query(collection(db, "board"), orderBy("correct", "desc"), limit(100)));
+    return r.docs.map(d => ({id: d.id, ...d.data()}));
+  },
+  me() { return uidP; }
+};
+window.dispatchEvent(new Event("kfzboard"));
+
 </script>
